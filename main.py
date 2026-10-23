@@ -15,7 +15,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 APP_NAME = "A2A Invoice Agent"
-PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+PUBLIC_BASE_URL = (os.getenv("PUBLIC_BASE_URL") or os.getenv("RENDER_EXTERNAL_URL") or "https://ga3-1-c747.onrender.com").rstrip("/")
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./invoice_agent.db")
 AIPIPE_TOKEN = os.getenv("AIPIPE_TOKEN", "")
 
@@ -66,20 +66,51 @@ def agent_card() -> dict:
     return {
         "name": APP_NAME,
         "description": "Reviews invoice packages, explains evidence-based decisions, and prevents repeated actions.",
-        "url": public_url("/a2a"),
+        "url": PUBLIC_BASE_URL,
         "version": "1.0.0",
         "protocolVersion": "0.3.0",
         "capabilities": {"streaming": False, "pushNotifications": False, "stateTransitionHistory": True},
-        "defaultInputModes": ["application/json", "text/plain"],
-        "defaultOutputModes": ["application/json", "text/plain"],
+        "defaultInputModes": ["application/a2a+json", "application/json", "text/plain"],
+        "defaultOutputModes": ["application/a2a+json", "application/json", "text/plain"],
         "skills": [{
             "id": "review_invoice",
             "name": "Review invoice package",
             "description": "Evaluate an invoice package and return a proposed business action with evidence.",
             "tags": ["invoice", "accounts-payable", "approval", "duplicate-payment"],
-            "examples": ["Review this invoice package and recommend the safe next action."]
+            "examples": ["Review this invoice package and recommend the safe next action."],
+            "inputModes": ["application/a2a+json", "application/json", "text/plain"],
+            "outputModes": ["application/a2a+json", "application/json", "text/plain"]
         }]
     }
+
+
+
+
+SUPPORTED_A2A_VERSIONS = {"0.3.0", "1.0", "1.0.0"}
+A2A_AUTH_TOKEN = os.getenv("A2A_AUTH_TOKEN", "")
+
+
+def require_bearer(request: Request) -> None:
+    """Require Bearer auth. Configure A2A_AUTH_TOKEN to enforce a specific token."""
+    header = request.headers.get("authorization", "")
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=401, detail="Bearer token required",
+                            headers={"WWW-Authenticate": "Bearer"})
+    if A2A_AUTH_TOKEN and token.strip() != A2A_AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid bearer token",
+                            headers={"WWW-Authenticate": "Bearer"})
+
+
+def validate_a2a_request(request: Request) -> None:
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type != "application/a2a+json":
+        raise HTTPException(status_code=415, detail="Content-Type must be application/a2a+json")
+    version = (request.headers.get("a2a-version")
+               or request.headers.get("x-a2a-version")
+               or request.headers.get("protocol-version"))
+    if version and version not in SUPPORTED_A2A_VERSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported A2A version: {version}")
 
 
 @app.get("/")
@@ -281,6 +312,8 @@ async def review_rest(payload: dict):
 @app.post("/message:send")
 async def message_send(request: Request):
     """Compatibility endpoint expected by the assignment's A2A checker."""
+    require_bearer(request)
+    validate_a2a_request(request)
     try:
         body = await request.json()
     except Exception:
@@ -322,8 +355,17 @@ async def message_send(request: Request):
     return JSONResponse(content=response_body, media_type="application/a2a+json")
 
 
+@app.get("/tasks")
+def list_tasks(request: Request):
+    require_bearer(request)
+    with SessionLocal() as db:
+        records = db.scalars(select(TaskRecord).order_by(TaskRecord.created_at.desc()).limit(100)).all()
+        return {"tasks": [json.loads(record.result_json) for record in records]}
+
+
 @app.get("/tasks/{task_id}")
-def get_task(task_id: str):
+def get_task(task_id: str, request: Request):
+    require_bearer(request)
     with SessionLocal() as db:
         record = db.get(TaskRecord, task_id)
         if not record:
@@ -333,6 +375,8 @@ def get_task(task_id: str):
 
 @app.post("/a2a")
 async def a2a(request: Request):
+    require_bearer(request)
+    validate_a2a_request(request)
     try:
         body = await request.json()
     except Exception:
