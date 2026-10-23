@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import (
     create_engine, Column, String, Text, DateTime, Boolean,
@@ -307,7 +308,7 @@ async def message_send(request: Request):
     decision = await review_and_store(package, task_id)
     task_state = "input-required" if decision.get("status") == "awaiting_approval" else "completed"
 
-    return {
+    response_body = {
         "id": decision["task_id"],
         "taskId": decision["task_id"],
         "contextId": context_id,
@@ -318,6 +319,7 @@ async def message_send(request: Request):
         }],
         "result": decision
     }
+    return JSONResponse(content=response_body, media_type="application/a2a+json")
 
 
 @app.get("/tasks/{task_id}")
