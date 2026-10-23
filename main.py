@@ -275,6 +275,51 @@ async def review_rest(payload: dict):
     return await review_and_store(package, task_id)
 
 
+
+
+@app.post("/message:send")
+async def message_send(request: Request):
+    """Compatibility endpoint expected by the assignment's A2A checker."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Request body must be valid JSON")
+
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object")
+
+    params = body.get("params") if isinstance(body.get("params"), dict) else body
+    package = extract_package(params)
+
+    task_id = (
+        params.get("taskId")
+        or params.get("task_id")
+        or body.get("taskId")
+        or body.get("task_id")
+    )
+    context_id = params.get("contextId") or params.get("context_id")
+
+    # Accept the common A2A message shape: {"message": {"parts": [...]}}.
+    message_obj = params.get("message")
+    if isinstance(message_obj, dict) and "parts" in message_obj:
+        package = message_obj
+
+    decision = await review_and_store(package, task_id)
+    task_state = "input-required" if decision.get("status") == "awaiting_approval" else "completed"
+
+    return {
+        "id": decision["task_id"],
+        "taskId": decision["task_id"],
+        "contextId": context_id,
+        "status": {"state": task_state},
+        "artifacts": [{
+            "name": "invoice-decision",
+            "parts": [{"kind": "data", "data": decision}]
+        }],
+        "result": decision
+    }
+
+
 @app.get("/tasks/{task_id}")
 def get_task(task_id: str):
     with SessionLocal() as db:
