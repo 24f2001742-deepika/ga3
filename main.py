@@ -37,7 +37,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
@@ -1250,3 +1250,10 @@ async def q10_wire_detail(row_id: int, request: Request):
                          "task_id": row["task_id"], "batch_id": row["batch_id"],
                          "who": row["who"], "note": row["note"],
                          "body": body, "resp": resp})
+
+# ---------------------------------------------------------------------------
+# ASGI entry point (Render command: uvicorn main:app)
+# Routes already include both the origin-level and /a2a paths, so the
+# router should be included exactly once.
+app = FastAPI(title="GA5 Invoice Action Agent", version="1.0.0")
+app.include_router(router)
