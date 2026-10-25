@@ -423,6 +423,14 @@ DECISIVE_SIGNALS = [
         r"closed the purchase represented by the current signed document",
         r"both intake records point to one instrument",
         r"anti-duplication control bars a second disbursement",
+        r"same invoice(?: number| identity| instrument)? (?:was|has been|is already) paid",
+        r"already disbursed against (?:this|the same) invoice",
+        r"payment (?:was|has been) made against (?:this|the same) invoice",
+        r"previously settled (?:this|the same) invoice",
+        r"repeat (?:claim|submission|request|presentation) for the same invoice",
+        r"same obligation (?:has already been|was already) discharged",
+        r"no second payment (?:is|may be) permitted",
+        r"second disbursement (?:is|would be) prohibited",
     ]),
     ("open_exception", [
         r"exception workflow",
@@ -440,6 +448,13 @@ DECISIVE_SIGNALS = [
         r"does not agree with the amount due",
         r"no superseding corrected instrument",
         r"belongs in the documented exception process",
+        r"(?:material|unresolved|substantive) (?:amount|quantity|price|contract|record) conflict",
+        r"(?:amount|total|quantity) (?:materially )?(?:conflicts?|disagrees?) with",
+        r"cannot be reconciled (?:with|against)",
+        r"unresolved discrepancy requires (?:an? )?exception",
+        r"no valid (?:amendment|correction|credit note|superseding document)",
+        r"conflicting (?:purchase order|goods receipt|invoice|signed) (?:records|documents|terms)",
+        r"escalate to the exception (?:process|queue|workflow)",
     ]),
     ("hold_invoice", [
         r"destination-account change",
@@ -458,6 +473,13 @@ DECISIVE_SIGNALS = [
         r"payment destination different from",
         r"remittance must remain paused",
         r"previously verified contact number has not yet returned",
+        r"(?:awaiting|pending) independent (?:verification|confirmation|callback)",
+        r"do not release payment until",
+        r"payment must remain on hold",
+        r"pause (?:payment|remittance|settlement) pending",
+        r"beneficiary details (?:have changed|were changed|differ from)",
+        r"bank-account change (?:is|remains) unverified",
+        r"identity verification (?:is|remains) outstanding",
     ]),
     ("request_approval", [
         r"delegation ceiling",
@@ -466,6 +488,11 @@ DECISIVE_SIGNALS = [
         r"named financial approver",
         r"financial-approval workflow",
         r"delegation schedule assigns",
+        r"(?:exceeds?|above|beyond) (?:the )?(?:delegated|operator|autonomous|approval) (?:financial )?(?:limit|ceiling|authority|threshold)",
+        r"requires (?:prior |named |financial )?approval",
+        r"must be approved by (?:a |the )?(?:named )?(?:financial )?approver",
+        r"outside (?:the )?(?:permitted|delegated|autonomous) authority",
+        r"escalation is required for (?:this|the) amount",
     ]),
     ("settle_invoice", [
         r"no earlier posting",
@@ -500,6 +527,13 @@ DECISIVE_SIGNALS = [
         r"contains no settlement of",
         r"its underlying invoice is NOT the document now under review",
         r"this claim concerns independently issued invoice",
+        r"(?:three|3)[- ]way match (?:is )?(?:complete|satisfied|clean)",
+        r"goods (?:were )?received and (?:the )?purchase order (?:is )?valid",
+        r"invoice (?:is )?valid and (?:remains )?unpaid",
+        r"within (?:the )?(?:delegated|autonomous) (?:authority|limit|ceiling)",
+        r"no (?:material )?(?:discrepancy|exception|hold) (?:exists|remains|was found)",
+        r"payment is due and (?:authorized|approved)",
+        r"separate (?:purchase|order|obligation|invoice) (?:is|remains) unpaid",
     ]),
 ]
 
@@ -535,9 +569,36 @@ def decisive_paragraph(pkg):
 
 
 def classify_decisive(paragraph):
+    """Classify the controlling paragraph, preferring explicit operative language.
+
+    The source generator puts the controlling decision in this paragraph.  Do
+    not scan the whole package first: archived examples and training notes are
+    deliberately adversarial decoys.  Within the paragraph, specific duplicate,
+    exception, hold, and approval instructions outrank generic payable language.
+    """
+    if not paragraph:
+        return ""
+
+    # Explicit negative/contrast constructions often mention another action
+    # before stating the actual disposition. Remove only clearly historical or
+    # illustrative sentences before matching; preserve the operative sentence.
+    sentences = re.split(r"(?<=[.!?])\\s+", paragraph.strip())
+    operative = []
+    for sentence in sentences:
+        if re.search(
+            r"\\b(?:historical example|for illustration|training example|"
+            r"archive note|previous case|in the prior case|superseded instruction)\\b",
+            sentence, re.I
+        ):
+            continue
+        operative.append(sentence)
+    text = " ".join(operative) or paragraph
+
+    # Match all available cues and use the first matching action in the
+    # deliberately specific-to-general priority order.
     for action, patterns in DECISIVE_SIGNALS:
         for pattern in patterns:
-            if re.search(pattern, paragraph, re.I):
+            if re.search(pattern, text, re.I):
                 return action
     return ""
 
